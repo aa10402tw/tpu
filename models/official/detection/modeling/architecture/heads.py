@@ -1137,10 +1137,10 @@ class SegmentationHead(object):
             kernel_initializer=tf.random_normal_initializer(stddev=0.01),
             activation=(None if self._use_batch_norm else self._activation),
             padding='same',
-            name='conv-%d' % i)
+            name='class-%d' % i)
         if self._use_batch_norm:
           features = self._batch_norm_activation(
-              features, is_training=is_training, name='conv-%d-bn' % i)
+              features, is_training=is_training, name='class-%d-bn' % i)
 
       if self._upsample_factor > 1:
         features = tf.layers.conv2d_transpose(

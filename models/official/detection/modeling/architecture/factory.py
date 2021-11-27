@@ -33,6 +33,7 @@ from modeling.architecture import resnet
 from modeling.architecture import spinenet
 from modeling.architecture import spinenet_mbconv
 
+from hyperparameters import params_dict
 
 def batch_norm_activation_generator(params):
   return nn_ops.BatchNormActivation(

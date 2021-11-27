@@ -27,6 +27,8 @@ from __future__ import print_function
 import base64
 import csv
 import io
+import os
+import cv2
 
 from absl import flags
 from absl import logging
@@ -70,6 +72,9 @@ flags.DEFINE_string(
 flags.DEFINE_string(
     'output_html', '/tmp/test.html',
     'The output HTML file that includes images with rendered detections.')
+flags.DEFINE_string(
+    'output_dir', './_output',
+    'The output folder.')
 flags.DEFINE_integer(
     'max_boxes_to_draw', 10, 'The maximum number of boxes to draw.')
 flags.DEFINE_float(
@@ -138,8 +143,8 @@ def main(unused_argv):
     outputs = model.build_outputs(
         images, {'image_info': images_info}, mode=mode_keys.PREDICT)
 
-    outputs['detection_boxes'] = (
-        outputs['detection_boxes'] / tf.tile(images_info[:, 2:3, :], [1, 1, 2]))
+    # outputs['detection_boxes'] = (
+    #     outputs['detection_boxes'] / tf.tile(images_info[:, 2:3, :], [1, 1, 2]))
 
     predictions = outputs
 
@@ -147,13 +152,14 @@ def main(unused_argv):
     saver = tf.train.Saver()
 
     image_with_detections_list = []
+    os.makedirs(FLAGS.output_dir, exist_ok=True)
     with tf.Session() as sess:
       print(' - Loading the checkpoint...')
       saver.restore(sess, FLAGS.checkpoint_path)
 
       image_files = tf.gfile.Glob(FLAGS.image_file_pattern)
       for i, image_file in enumerate(image_files):
-        print(' - Processing image %d...' % i)
+        print(' - Processing image %d...' % i, os.path.basename(image_file))
 
         with tf.gfile.GFile(image_file, 'rb') as f:
           image_bytes = f.read()
@@ -161,61 +167,65 @@ def main(unused_argv):
         image = Image.open(image_file)
         image = image.convert('RGB')  # needed for images with 4 channels.
         width, height = image.size
-        np_image = (np.array(image.getdata())
-                    .reshape(height, width, 3).astype(np.uint8))
+        np_image = (np.array(image.getdata()).reshape(height, width, 3).astype(np.uint8))
 
-        predictions_np = sess.run(
-            predictions, feed_dict={image_input: image_bytes})
+        predictions_np = sess.run(predictions, feed_dict={image_input: image_bytes})
+        pred_logit = predictions_np['logits']
+        pred_label = np.argmax(pred_logit, axis=3)
+        color_label = label2color(pred_label[0])
+        color_label = cv2.cvtColor((color_label*255.0).astype(np.uint8), cv2.COLOR_BGR2RGB)
 
-        num_detections = int(predictions_np['num_detections'][0])
-        np_boxes = predictions_np['detection_boxes'][0, :num_detections]
-        np_scores = predictions_np['detection_scores'][0, :num_detections]
-        np_classes = predictions_np['detection_classes'][0, :num_detections]
-        np_classes = np_classes.astype(np.int32)
-        np_masks = None
-        if 'detection_masks' in predictions_np:
-          instance_masks = predictions_np['detection_masks'][0, :num_detections]
-          np_masks = mask_utils.paste_instance_masks(
-              instance_masks, box_utils.yxyx_to_xywh(np_boxes), height, width)
+        image_name = os.path.basename(image_file).replace('.jpg', '')
+        colorlabel_path = f"{FLAGS.output_dir}/{image_name}_colorlabel.png"
+        predlogit_path = f"{FLAGS.output_dir}/{image_name}_predlogit.bin"
 
-        image_with_detections = (
-            visualization_utils.visualize_boxes_and_labels_on_image_array(
-                np_image,
-                np_boxes,
-                np_classes,
-                np_scores,
-                label_map_dict,
-                instance_masks=np_masks,
-                use_normalized_coordinates=False,
-                max_boxes_to_draw=FLAGS.max_boxes_to_draw,
-                min_score_thresh=FLAGS.min_score_threshold))
-        image_with_detections_list.append(image_with_detections)
+        cv2.imwrite(colorlabel_path, color_label)
+        pred_logit.tofile(predlogit_path)
 
-  print(' - Saving the outputs...')
-  formatted_image_with_detections_list = [
-      Image.fromarray(image.astype(np.uint8))
-      for image in image_with_detections_list]
-  html_str = '<html>'
-  image_strs = []
-  for formatted_image in formatted_image_with_detections_list:
-    with io.BytesIO() as stream:
-      formatted_image.save(stream, format='JPEG')
-      data_uri = base64.b64encode(stream.getvalue()).decode('utf-8')
-    image_strs.append(
-        '<img src="data:image/jpeg;base64,{}", height=800>'
-        .format(data_uri))
-  images_str = ' '.join(image_strs)
-  html_str += images_str
-  html_str += '</html>'
-  with tf.gfile.GFile(FLAGS.output_html, 'w') as f:
-    f.write(html_str)
-
+def label2color(label_mask):
+    label_colours = np.asarray(
+        [
+            [0, 0, 0],
+            [128, 0, 0],
+            [0, 128, 0],
+            [128, 128, 0],
+            [0, 0, 128],
+            [128, 0, 128],
+            [0, 128, 128],
+            [128, 128, 128],
+            [64, 0, 0],
+            [192, 0, 0],
+            [64, 128, 0],
+            [192, 128, 0],
+            [64, 0, 128],
+            [192, 0, 128],
+            [64, 128, 128],
+            [192, 128, 128],
+            [0, 64, 0],
+            [128, 64, 0],
+            [0, 192, 0],
+            [128, 192, 0],
+            [0, 64, 128],
+        ]
+    )
+    r = label_mask.copy()
+    g = label_mask.copy()
+    b = label_mask.copy()
+    for ll in range(0, 21):
+        r[label_mask == ll] = label_colours[ll, 0]
+        g[label_mask == ll] = label_colours[ll, 1]
+        b[label_mask == ll] = label_colours[ll, 2]
+    rgb = np.zeros((label_mask.shape[0], label_mask.shape[1], 3))
+    rgb[:, :, 0] = r / 255.0
+    rgb[:, :, 1] = g / 255.0
+    rgb[:, :, 2] = b / 255.0
+    return rgb
 
 if __name__ == '__main__':
   flags.mark_flag_as_required('model')
   flags.mark_flag_as_required('checkpoint_path')
   flags.mark_flag_as_required('label_map_file')
   flags.mark_flag_as_required('image_file_pattern')
-  flags.mark_flag_as_required('output_html')
+  #flags.mark_flag_as_required('output_html')
   logging.set_verbosity(logging.INFO)
   tf.app.run(main)
