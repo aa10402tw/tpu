@@ -1,22 +1,26 @@
-# Cloud TPUs #
+# Setup steps on Windows #
 
-This repository is a collection of reference models and tools used with
-[Cloud TPUs](https://cloud.google.com/tpu/).
-
-The fastest way to get started training a model on a Cloud TPU is by following
-the tutorial. Click the button below to launch the tutorial using Google Cloud
-Shell.
-
-[![Open in Cloud Shell](http://gstatic.com/cloudssh/images/open-btn.svg)](https://console.cloud.google.com/cloudshell/open?git_repo=https%3A%2F%2Fgithub.com%2Ftensorflow%2Ftpu&page=shell&tutorial=tools%2Fctpu%2Ftutorial.md)
-
-_Note:_ This repository is a public mirror, pull requests will not be accepted.
-Please file an issue if you have a feature or bug request.
-
-## Running Models
-
-To run models in the `models` subdirectory, you may need to add the top-level
-`/models` folder to the Python path with the command:
-
+## 1. Install package
 ```
-export PYTHONPATH="$PYTHONPATH:/path/to/models"
+pip install tensorflow-gpu==1.15  # GPU
+pip install pytk
+pip install --user Cython matplotlib opencv-python-headless pyyaml Pillow
+pip install "git+https://github.com/philferriere/cocoapi.git#egg=pycocotools&subdirectory=PythonAPI"
+```
+
+## 2. Download Checkpoint 
+Download checkpoints for semantic segmantation form [here](https://github.com/tensorflow/tpu/tree/master/models/official/detection/projects/self_training)
+
+## 3. Running Models
+=== Windows Command (at /tpu)===
+```
+set PYTHONPATH=%PYTHONPATH%;./models
+python ./models/official/detection/inference.py ^
+  --model="segmentation" ^
+  --image_size=640 ^
+  --config_file="./models/official/detection/projects/self_training/configs/pascal_seg_efficientnet-l2-nasfpn.yaml" ^
+  --checkpoint_path="./models/official/detection/projects/self_training/weights/model.ckpt" ^
+  --label_map_file="./models/official/detection/datasets/coco_label_map.csv" ^
+  --image_file_pattern="./_input/*.jpg" ^
+  --output_dir="./_output/"
 ```
