@@ -20,6 +20,8 @@ supports running on CPU/GPU with batch size 1.
 """
 # pylint: enable=line-too-long
 
+
+
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -45,6 +47,10 @@ from utils import input_utils
 from utils import mask_utils
 from utils.object_detection import visualization_utils
 from hyperparameters import params_dict
+
+from tqdm import tqdm
+import os
+os.environ["CUDA_VISIBLE_DEVICES"]="0"
 
 
 FLAGS = flags.FLAGS
@@ -127,7 +133,8 @@ def main(unused_argv):
 
     image = input_utils.normalize_image(image)
     image_size = [FLAGS.image_size, FLAGS.image_size]
-    image, image_info = input_utils.resize_and_crop_image(
+    image = tf.image.resize_images(image, image_size, align_corners=True)
+    _, image_info = input_utils.resize_and_crop_image(
         image,
         image_size,
         image_size,
@@ -140,8 +147,7 @@ def main(unused_argv):
     images_info = tf.expand_dims(image_info, axis=0)
 
     # model inference
-    outputs = model.build_outputs(
-        images, {'image_info': images_info}, mode=mode_keys.PREDICT)
+    outputs = model.build_outputs(images, {'image_info': images_info}, mode=mode_keys.PREDICT)
 
     # outputs['detection_boxes'] = (
     #     outputs['detection_boxes'] / tf.tile(images_info[:, 2:3, :], [1, 1, 2]))
@@ -153,19 +159,23 @@ def main(unused_argv):
 
     image_with_detections_list = []
     os.makedirs(FLAGS.output_dir, exist_ok=True)
-    with tf.Session() as sess:
+    gpu_options = tf.GPUOptions(visible_device_list="0")
+    with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options)) as sess:
       print(' - Loading the checkpoint...')
       saver.restore(sess, FLAGS.checkpoint_path)
+      devices = sess.list_devices()
 
       image_files = tf.gfile.Glob(FLAGS.image_file_pattern)
+      pbar = tqdm(total = len(image_files))
       for i, image_file in enumerate(image_files):
-        print(' - Processing image %d...' % i, os.path.basename(image_file))
+        #print(' - Processing image %d...' % i, os.path.basename(image_file))
 
         with tf.gfile.GFile(image_file, 'rb') as f:
           image_bytes = f.read()
 
         image = Image.open(image_file)
         image = image.convert('RGB')  # needed for images with 4 channels.
+        image = image.resize(image_size)
         width, height = image.size
         np_image = (np.array(image.getdata()).reshape(height, width, 3).astype(np.uint8))
 
@@ -174,13 +184,19 @@ def main(unused_argv):
         pred_label = np.argmax(pred_logit, axis=3)
         color_label = label2color(pred_label[0])
         color_label = cv2.cvtColor((color_label*255.0).astype(np.uint8), cv2.COLOR_BGR2RGB)
+        #color_label = cv2.resize(color_label, image_size)
 
         image_name = os.path.basename(image_file).replace('.jpg', '')
         colorlabel_path = f"{FLAGS.output_dir}/{image_name}_colorlabel.png"
         predlogit_path = f"{FLAGS.output_dir}/{image_name}_predlogit.bin"
 
         cv2.imwrite(colorlabel_path, color_label)
-        pred_logit.tofile(predlogit_path)
+        #cv2.imwrite(f"{FLAGS.output_dir}/{image_name}.png", np_image)
+        #pred_logit.tofile(predlogit_path)
+        pbar.set_postfix({"Processed": image_name})
+        pbar.update()
+        if i > 16:
+            break
 
 def label2color(label_mask):
     label_colours = np.asarray(
